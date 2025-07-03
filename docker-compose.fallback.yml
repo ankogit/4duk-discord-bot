@@ -1,0 +1,16 @@
+version: "3.8"
+services:
+  radio:
+    build: .
+    env_file: .env
+    container_name: discord-radio-bot-fallback
+    restart: unless-stopped
+    # Упрощенная сетевая конфигурация для критических случаев
+    network_mode: "host"
+    pid: "host"
+    privileged: true
+    volumes:
+      - /etc/resolv.conf:/etc/resolv.conf:ro
+    environment:
+      - PYTHONUNBUFFERED=1
+    command: ["python", "-u", "bot.py"]

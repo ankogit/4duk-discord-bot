@@ -5,3 +5,13 @@ services:
     env_file: .env
     container_name: discord-radio-bot
     restart: unless-stopped
+    network_mode: "host"
+    dns:
+      - 8.8.8.8
+      - 8.8.4.4
+      - 1.1.1.1
+    extra_hosts:
+      - "gateway-us-east1-c.discord.gg:162.159.129.233"
+      - "discord.gg:162.159.129.233"
+    cap_add:
+      - NET_ADMIN
