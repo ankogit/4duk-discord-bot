@@ -85,13 +85,32 @@ async def on_ready():
     voice_check_loop.start()
 
 @bot.command()
+@bot.command()
 async def join(ctx):
-    if ctx.author.voice:
-        channel = ctx.author.voice.channel
-        await channel.connect(reconnect=False)
-        await ctx.send(f"Подключился к {channel.name}")
-    else:
+    """Подключает бота к голосовому каналу"""
+    if not ctx.author.voice:
         await ctx.send("Ты не в голосовом канале!")
+        return
+
+    channel = ctx.author.voice.channel
+    try:
+        vc = await channel.connect(reconnect=False)
+        await ctx.send(f"Подключился к {channel.name}")
+    except discord.errors.ConnectionClosed as e:
+        if e.code == 4006:
+            await ctx.send("Сессия устарела, пробую переподключиться...")
+            try:
+                # Делаем полный реконнект
+                if ctx.voice_client:
+                    await ctx.voice_client.disconnect(force=True)
+                vc = await channel.connect(reconnect=False)
+                await ctx.send(f"Подключился к {channel.name} после реконнекта")
+            except Exception as ex:
+                await ctx.send(f"❌ Не удалось подключиться: {ex}")
+        else:
+            await ctx.send(f"❌ Ошибка подключения: {e}")
+    except Exception as e:
+        await ctx.send(f"❌ Не удалось подключиться: {e}")
 
 @bot.command()
 async def radio(ctx):
