@@ -1,4 +1,5 @@
 import os
+import asyncio
 import discord
 from discord.ext import commands
 from discord import FFmpegPCMAudio
@@ -7,17 +8,41 @@ from dotenv import load_dotenv
 load_dotenv()
 
 intents = discord.Intents.default()
-intents.message_content = True  # Нужен для команд по сообщениям
-intents.voice_states = True     # Нужен для работы с голосовыми каналами
-intents.guilds = True           # Стандартный доступ к серверам
+intents.message_content = True
+intents.voice_states = True
+intents.guilds = True
 
 bot = commands.Bot(command_prefix="!", intents=intents)
 
 RADIO_URL = "http://radio.4duk.ru/4duk128.mp3"
 FFMPEG_OPTIONS = {
-    'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5',
+    'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5 -reconnect_at_eof 1',
     'options': '-vn'
 }
+
+# Храним статус радио для каждого сервера
+radio_status = {}
+
+async def start_radio(vc: discord.VoiceClient, guild_id: int):
+    """Запускает радио и перезапускает при обрыве"""
+    def after_play(error):
+        if error:
+            print(f"[ERROR] Поток радио завершился с ошибкой: {error}")
+        # Если радио всё ещё активно в этом guild
+        if radio_status.get(guild_id, False):
+            asyncio.run_coroutine_threadsafe(reconnect_radio(vc, guild_id), bot.loop)
+
+    if vc.is_playing():
+        vc.stop()
+
+    print(f"[INFO] Запуск радио для {guild_id}")
+    vc.play(FFmpegPCMAudio(RADIO_URL, **FFMPEG_OPTIONS), after=after_play)
+
+async def reconnect_radio(vc: discord.VoiceClient, guild_id: int):
+    """Переподключает радио после обрыва"""
+    await asyncio.sleep(2)  # небольшая задержка перед перезапуском
+    if vc.is_connected():
+        await start_radio(vc, guild_id)
 
 @bot.event
 async def on_ready():
@@ -25,6 +50,7 @@ async def on_ready():
 
 @bot.command()
 async def join(ctx):
+    """Подключает бота к голосовому каналу"""
     if ctx.author.voice:
         channel = ctx.author.voice.channel
         await channel.connect()
@@ -34,18 +60,24 @@ async def join(ctx):
 
 @bot.command()
 async def radio(ctx):
-    vc = ctx.voice_client
-    if not vc:
+    """Включает радио"""
+    if not ctx.voice_client:
         if ctx.author.voice:
             vc = await ctx.author.voice.channel.connect()
         else:
             await ctx.send("Ты не в голосовом канале!")
             return
-    vc.play(FFmpegPCMAudio(RADIO_URL, **FFMPEG_OPTIONS))
+    else:
+        vc = ctx.voice_client
+
+    radio_status[ctx.guild.id] = True
+    await start_radio(vc, ctx.guild.id)
     await ctx.send("🎵 Вещаю радио!")
 
 @bot.command()
 async def stop(ctx):
+    """Останавливает радио и отключается"""
+    radio_status[ctx.guild.id] = False
     if ctx.voice_client:
         await ctx.voice_client.disconnect()
         await ctx.send("Отключился.")
@@ -55,5 +87,14 @@ async def stop(ctx):
 @bot.command()
 async def ping(ctx):
     await ctx.send("Pong!")
-    
+
+# Автопереподключение при разрыве voice WebSocket
+@bot.event
+async def on_disconnect():
+    print("[WARN] Потеряно подключение к Discord WebSocket — попытка восстановления...")
+
+@bot.event
+async def on_resumed():
+    print("[INFO] Сессия возобновлена.")
+
 bot.run(os.getenv("DISCORD_TOKEN"))
