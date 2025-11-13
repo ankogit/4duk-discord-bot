@@ -6,5 +6,8 @@ services:
     env_file: .env
     container_name: discord-radio-bot
     restart: unless-stopped
+    volumes:
+      # Сохраняем конфигурацию автоконнекта между перезапусками
+      - ./data:/app/data
     # Логи будут видны при запуске через docker compose up
     # Для просмотра логов: docker compose logs -f

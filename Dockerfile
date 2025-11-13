@@ -25,9 +25,10 @@ COPY . .
 
 # Build the application with optimizations
 # -ldflags="-s -w" strips debug info to reduce binary size
+# -mod=mod ignores vendor directory and uses go.mod directly
 RUN CGO_ENABLED=1 GOOS=linux go build \
+    -mod=mod \
     -ldflags="-s -w" \
-    -a -installsuffix cgo \
     -o bot ./cmd/bot
 
 # Runtime stage
@@ -47,8 +48,9 @@ WORKDIR /app
 # Copy binary from builder
 COPY --from=builder /app/bot .
 
-# Set ownership
-RUN chown -R bot:bot /app
+# Create data directory for persistent storage
+RUN mkdir -p /app/data && \
+    chown -R bot:bot /app
 
 USER bot
 

@@ -30,6 +30,7 @@ requirements.txt
 go.work
 bin/
 *.log
+vendor/
 
 # IDE
 .vscode/

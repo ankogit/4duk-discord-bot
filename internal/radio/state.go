@@ -6,10 +6,12 @@ import (
 
 // State represents the state of radio for a guild
 type State struct {
-	Active            bool
-	ChannelID         string
-	ReconnectAttempts int
-	mu                sync.Mutex
+	Active             bool
+	ChannelID          string
+	AutoChannelID      string // Channel ID for auto-join when users are present
+	AutoConnectEnabled bool   // Whether auto-connect is enabled
+	ReconnectAttempts  int
+	mu                 sync.Mutex
 }
 
 // NewState creates a new radio state
@@ -78,5 +80,33 @@ func (s *State) Reset() {
 	s.Active = false
 	s.ChannelID = ""
 	s.ReconnectAttempts = 0
+	// Note: AutoChannelID is NOT reset, so it persists
 }
 
+// SetAutoChannelID sets the auto-join channel ID
+func (s *State) SetAutoChannelID(channelID string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.AutoChannelID = channelID
+}
+
+// GetAutoChannelID returns the auto-join channel ID
+func (s *State) GetAutoChannelID() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.AutoChannelID
+}
+
+// SetAutoConnectEnabled sets whether auto-connect is enabled
+func (s *State) SetAutoConnectEnabled(enabled bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.AutoConnectEnabled = enabled
+}
+
+// IsAutoConnectEnabled returns whether auto-connect is enabled
+func (s *State) IsAutoConnectEnabled() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.AutoConnectEnabled
+}

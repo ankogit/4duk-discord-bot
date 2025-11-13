@@ -59,6 +59,7 @@ func New(cfg *config.Config, logger *logrus.Logger) (*Bot, error) {
 	// Register event handlers
 	session.AddHandler(bot.onReady)
 	session.AddHandler(bot.onMessageCreate)
+	session.AddHandler(bot.onVoiceStateUpdate)
 
 	return bot, nil
 }
@@ -88,7 +89,16 @@ func (b *Bot) Stop() error {
 		state.SetActive(false)
 
 		if vc, exists := b.session.VoiceConnections[guildID]; exists {
-			vc.Disconnect(context.Background())
+			// Remove from map first to prevent Kill() panic
+			delete(b.session.VoiceConnections, guildID)
+			func() {
+				defer func() {
+					if r := recover(); r != nil {
+						b.logger.Debugf("[%s] Panic during disconnect (ignored): %v", guildID, r)
+					}
+				}()
+				_ = vc.Disconnect(context.Background())
+			}()
 		}
 
 		// Cleanup encoder

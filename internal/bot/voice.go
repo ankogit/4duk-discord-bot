@@ -20,7 +20,16 @@ func (b *Bot) connectToChannel(s *discordgo.Session, guildID, channelID string) 
 			}
 		}
 		// Disconnect from current channel if wrong channel or not ready
-		vc.Disconnect(context.Background())
+		// Remove from map first to prevent Kill() panic
+		delete(s.VoiceConnections, guildID)
+		func() {
+			defer func() {
+				if r := recover(); r != nil {
+					b.logger.Debugf("[%s] Panic during disconnect (ignored): %v", guildID, r)
+				}
+			}()
+			_ = vc.Disconnect(context.Background())
+		}()
 	}
 
 	// Connect to the channel with retry logic
@@ -39,13 +48,42 @@ func (b *Bot) connectToChannel(s *discordgo.Session, guildID, channelID string) 
 			time.Sleep(time.Duration(attempt) * time.Second)
 			// Disconnect any existing connection
 			if existing, exists := s.VoiceConnections[guildID]; exists {
-				existing.Disconnect(context.Background())
+				// Remove from map first to prevent Kill() panic
+				delete(s.VoiceConnections, guildID)
+				// Try to disconnect, but ignore errors/panics
+				func() {
+					defer func() {
+						if r := recover(); r != nil {
+							b.logger.Debugf("[%s] Panic during disconnect (ignored): %v", guildID, r)
+						}
+					}()
+					_ = existing.Disconnect(context.Background())
+				}()
 				time.Sleep(500 * time.Millisecond)
 			}
 		}
 
-		vc, err = s.ChannelVoiceJoin(ctx, guildID, channelID, false, true)
-		if err == nil {
+		// Wrap ChannelVoiceJoin in recover to catch panics from fork
+		func() {
+			defer func() {
+				if r := recover(); r != nil {
+					b.logger.Warnf("[%s] Panic during ChannelVoiceJoin: %v", guildID, r)
+					// Remove any bad connection from map
+					if badVC, exists := s.VoiceConnections[guildID]; exists {
+						delete(s.VoiceConnections, guildID)
+						// Try to clean up, but ignore panics
+						func() {
+							defer func() { recover() }()
+							_ = badVC.Disconnect(context.Background())
+						}()
+					}
+					err = fmt.Errorf("panic during join: %v", r)
+				}
+			}()
+			vc, err = s.ChannelVoiceJoin(ctx, guildID, channelID, false, true)
+		}()
+
+		if err == nil && vc != nil {
 			break
 		}
 
@@ -79,10 +117,20 @@ func (b *Bot) connectToChannel(s *discordgo.Session, guildID, channelID string) 
 				return vc, nil
 			}
 		case <-timeout.C:
-			vc.Disconnect(context.Background())
+			// Remove from map first to prevent Kill() panic
+			delete(s.VoiceConnections, guildID)
+			func() {
+				defer func() { recover() }()
+				_ = vc.Disconnect(context.Background())
+			}()
 			return nil, fmt.Errorf("timeout waiting for voice connection")
 		case <-b.ctx.Done():
-			vc.Disconnect(b.ctx)
+			// Remove from map first to prevent Kill() panic
+			delete(s.VoiceConnections, guildID)
+			func() {
+				defer func() { recover() }()
+				_ = vc.Disconnect(b.ctx)
+			}()
 			return nil, b.ctx.Err()
 		}
 	}
