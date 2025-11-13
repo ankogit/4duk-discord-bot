@@ -32,19 +32,28 @@ func (b *Bot) reconnectRadio(guildID string) {
 	}
 
 	// Check if there are users in the channel before reconnecting
-	userCount := b.countUsersInChannel(guildID, channelID)
+	// Use session state for more accurate count
+	userCount := b.countUsersInChannelFromState(guildID, channelID)
 	if userCount == 0 {
-		b.logger.Infof("[%s] No users in channel %s, stopping radio instead of reconnecting", guildID, channelID)
-		state.SetActive(false)
-		state.ResetReconnectAttempts()
+		// Double-check with a small delay to avoid false positives
+		time.Sleep(500 * time.Millisecond)
+		userCount = b.countUsersInChannelFromState(guildID, channelID)
 
-		// Disconnect if connected
-		if vc, exists := b.session.VoiceConnections[guildID]; exists {
-			delete(b.session.VoiceConnections, guildID)
-			func() {
-				defer func() { recover() }()
-				_ = vc.Disconnect(b.ctx)
-			}()
+		if userCount == 0 {
+			b.logger.Infof("[%s] No users in channel %s (confirmed), stopping radio instead of reconnecting", guildID, channelID)
+			state.SetActive(false)
+			state.ResetReconnectAttempts()
+
+			// Disconnect if connected
+			if vc, exists := b.session.VoiceConnections[guildID]; exists {
+				delete(b.session.VoiceConnections, guildID)
+				func() {
+					defer func() { recover() }()
+					_ = vc.Disconnect(b.ctx)
+				}()
+			}
+		} else {
+			b.logger.Debugf("[%s] UserCount changed to %d after delay, proceeding with reconnect", guildID, userCount)
 		}
 		return
 	}
@@ -87,15 +96,12 @@ func (b *Bot) reconnectRadio(guildID string) {
 }
 
 // voiceCheckLoop periodically checks voice connections
+// Only checks for dead connections to reconnect, not user count (handled by events)
 func (b *Bot) voiceCheckLoop() {
 	defer b.wg.Done()
 
 	ticker := time.NewTicker(b.config.VoiceCheckInterval)
 	defer ticker.Stop()
-
-	// Also check auto-connect channels
-	autoConnectTicker := time.NewTicker(30 * time.Second)
-	defer autoConnectTicker.Stop()
 
 	for {
 		select {
@@ -103,13 +109,12 @@ func (b *Bot) voiceCheckLoop() {
 			return
 		case <-ticker.C:
 			b.checkVoiceConnections()
-		case <-autoConnectTicker.C:
-			b.checkAutoConnectChannels()
 		}
 	}
 }
 
-// checkVoiceConnections checks all active voice connections
+// checkVoiceConnections checks all active voice connections for dead connections
+// User count checking is handled by onVoiceStateUpdate events
 func (b *Bot) checkVoiceConnections() {
 	guildIDs := b.radioManager.GetAllGuildIDs()
 
@@ -119,29 +124,8 @@ func (b *Bot) checkVoiceConnections() {
 			continue
 		}
 
-		channelID := state.GetChannelID()
-		if channelID == "" {
-			continue
-		}
-
-		// Check if there are users in the channel before attempting reconnect
-		userCount := b.countUsersInChannel(guildID, channelID)
-		if userCount == 0 {
-			b.logger.Infof("[%s] voice_check_loop: no users in channel %s, stopping radio", guildID, channelID)
-			state.SetActive(false)
-			state.ResetReconnectAttempts()
-
-			// Disconnect if connected
-			if vc, exists := b.session.VoiceConnections[guildID]; exists {
-				delete(b.session.VoiceConnections, guildID)
-				func() {
-					defer func() { recover() }()
-					_ = vc.Disconnect(b.ctx)
-				}()
-			}
-			continue
-		}
-
+		// Only check if connection is dead, don't check user count
+		// User count is handled by onVoiceStateUpdate events
 		vc, exists := b.session.VoiceConnections[guildID]
 		if !exists || vc == nil || vc.Status != discordgo.VoiceConnectionStatusReady {
 			b.logger.Infof("[%s] voice_check_loop: detected dead vc -> scheduling reconnect", guildID)
@@ -297,7 +281,12 @@ func (b *Bot) countUsersInChannelFromState(guildID, channelID string) int {
 	for _, vs := range guild.VoiceStates {
 		if vs.ChannelID == channelID && vs.UserID != b.session.State.User.ID {
 			// Check if user is a bot
+			// Try State.Member first (faster, uses cache)
 			member, err := b.session.State.Member(guildID, vs.UserID)
+			if err != nil {
+				// Fallback to GuildMember if not in cache
+				member, err = b.session.GuildMember(guildID, vs.UserID)
+			}
 			if err == nil && member != nil && !member.User.Bot {
 				userCount++
 			}
