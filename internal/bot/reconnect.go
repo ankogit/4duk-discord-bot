@@ -37,7 +37,7 @@ func (b *Bot) reconnectRadio(guildID string) {
 		b.logger.Infof("[%s] No users in channel %s, stopping radio instead of reconnecting", guildID, channelID)
 		state.SetActive(false)
 		state.ResetReconnectAttempts()
-		
+
 		// Disconnect if connected
 		if vc, exists := b.session.VoiceConnections[guildID]; exists {
 			delete(b.session.VoiceConnections, guildID)
@@ -130,7 +130,7 @@ func (b *Bot) checkVoiceConnections() {
 			b.logger.Infof("[%s] voice_check_loop: no users in channel %s, stopping radio", guildID, channelID)
 			state.SetActive(false)
 			state.ResetReconnectAttempts()
-			
+
 			// Disconnect if connected
 			if vc, exists := b.session.VoiceConnections[guildID]; exists {
 				delete(b.session.VoiceConnections, guildID)
@@ -273,6 +273,31 @@ func (b *Bot) countUsersInChannel(guildID, channelID string) int {
 		if vs.ChannelID == channelID && vs.UserID != b.session.State.User.ID {
 			// Check if user is a bot
 			member, err := b.session.GuildMember(guildID, vs.UserID)
+			if err == nil && member != nil && !member.User.Bot {
+				userCount++
+			}
+		}
+	}
+
+	return userCount
+}
+
+// countUsersInChannelFromState counts non-bot users in a voice channel using session state
+// This is more up-to-date than guild.VoiceStates
+func (b *Bot) countUsersInChannelFromState(guildID, channelID string) int {
+	userCount := 0
+
+	// Get all voice states from session state
+	guild, err := b.session.State.Guild(guildID)
+	if err != nil {
+		b.logger.WithError(err).Debugf("[%s] Failed to get guild from state", guildID)
+		return 0
+	}
+
+	for _, vs := range guild.VoiceStates {
+		if vs.ChannelID == channelID && vs.UserID != b.session.State.User.ID {
+			// Check if user is a bot
+			member, err := b.session.State.Member(guildID, vs.UserID)
 			if err == nil && member != nil && !member.User.Bot {
 				userCount++
 			}
