@@ -1,7 +1,10 @@
 version: "3.8"
+
 services:
   radio:
     build: .
     env_file: .env
     container_name: discord-radio-bot
     restart: unless-stopped
+    # Логи будут видны при запуске через docker compose up
+    # Для просмотра логов: docker compose logs -f

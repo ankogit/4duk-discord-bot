@@ -1,21 +1,55 @@
-FROM python:3.11-slim
+# Build stage
+FROM golang:1.21-alpine AS builder
 
-# Установка зависимостей системы
-RUN apt-get update && apt-get install -y \
-    build-essential \
-    libffi-dev \
-    python3-dev \
-    && rm -rf /var/lib/apt/lists/*
-    
-# Установка ffmpeg
-RUN apt-get update && apt-get install -y ffmpeg
+# Install build dependencies including opus and opusfile
+# This layer will be cached if dependencies don't change
+RUN apk add --no-cache \
+    git \
+    gcc \
+    musl-dev \
+    opus-dev \
+    opusfile-dev \
+    pkgconfig
 
 WORKDIR /app
 
-COPY requirements.txt .
+# Copy go mod files first for better caching
+# This layer will be cached unless go.mod/go.sum change
+COPY go.mod go.sum ./
 
-RUN pip install --no-cache-dir -r requirements.txt
+# Download dependencies (cached unless go.mod/go.sum change)
+RUN go mod download
 
+# Copy source code (only this layer rebuilds on code changes)
 COPY . .
 
-CMD ["python", "bot.py"]
+# Build the application with optimizations
+# -ldflags="-s -w" strips debug info to reduce binary size
+RUN CGO_ENABLED=1 GOOS=linux go build \
+    -ldflags="-s -w" \
+    -a -installsuffix cgo \
+    -o bot ./cmd/bot
+
+# Runtime stage
+FROM alpine:latest
+
+# Install runtime dependencies in one layer for better caching
+RUN apk add --no-cache \
+    ffmpeg \
+    ca-certificates \
+    opus \
+    opusfile && \
+    addgroup -g 1000 bot && \
+    adduser -D -u 1000 -G bot bot
+
+WORKDIR /app
+
+# Copy binary from builder
+COPY --from=builder /app/bot .
+
+# Set ownership
+RUN chown -R bot:bot /app
+
+USER bot
+
+CMD ["./bot"]
