@@ -269,8 +269,10 @@ func (b *Bot) onVoiceStateUpdate(s *discordgo.Session, vs *discordgo.VoiceStateU
 			return
 		}
 
-		// Count remaining users in channel
-		userCount := b.countUsersInChannel(guildID, leftChannelID)
+		// Count remaining users in channel (using more up-to-date state)
+		userCount := b.countUsersInChannelFromState(guildID, leftChannelID)
+		b.logger.Infof("[%s] User %s left channel %s, remaining users: %d", guildID, member.User.Username, leftChannelID, userCount)
+		
 		if userCount == 0 {
 			b.logger.Infof("[%s] Last user left channel %s, stopping radio", guildID, leftChannelID)
 			
@@ -286,6 +288,8 @@ func (b *Bot) onVoiceStateUpdate(s *discordgo.Session, vs *discordgo.VoiceStateU
 					_ = vc.Disconnect(b.ctx)
 				}()
 			}
+		} else {
+			b.logger.Infof("[%s] %d users still in channel %s, keeping radio", guildID, userCount, leftChannelID)
 		}
 	} else if vs.BeforeUpdate != nil && vs.BeforeUpdate.ChannelID != "" && vs.ChannelID != "" && vs.BeforeUpdate.ChannelID != vs.ChannelID {
 		// User moved from one channel to another
@@ -298,8 +302,10 @@ func (b *Bot) onVoiceStateUpdate(s *discordgo.Session, vs *discordgo.VoiceStateU
 			if err == nil && !member.User.Bot {
 				// Check if radio is active for the channel user left
 				if state.IsActive() && state.GetChannelID() == leftChannelID {
-					// Count remaining users in the channel user left
-					userCount := b.countUsersInChannel(guildID, leftChannelID)
+					// Count remaining users in the channel user left (using more up-to-date state)
+					userCount := b.countUsersInChannelFromState(guildID, leftChannelID)
+					b.logger.Infof("[%s] User %s moved from channel %s, remaining users: %d", guildID, member.User.Username, leftChannelID, userCount)
+					
 					if userCount == 0 {
 						b.logger.Infof("[%s] Last user left channel %s, stopping radio", guildID, leftChannelID)
 						
@@ -315,6 +321,8 @@ func (b *Bot) onVoiceStateUpdate(s *discordgo.Session, vs *discordgo.VoiceStateU
 								_ = vc.Disconnect(b.ctx)
 							}()
 						}
+					} else {
+						b.logger.Infof("[%s] %d users still in channel %s, keeping radio", guildID, userCount, leftChannelID)
 					}
 				}
 			}
